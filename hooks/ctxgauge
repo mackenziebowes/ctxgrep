@@ -26,6 +26,14 @@ claude_pid() {
   done
 }
 
+# Who this session is across process restarts: the agent's name, else the process id.
+key() {
+  local pid n
+  pid=$(claude_pid); [ -n "$pid" ] || return
+  n=$(jq -r '.name // empty' "$HOME/.claude/sessions/$pid.json" 2>/dev/null)
+  if [ -n "$n" ]; then echo "name-${n//\//_}"; else echo "$pid"; fi
+}
+
 # Percent of the window the context holds, from the newest reply's usage in the transcript.
 percent() {
   [ -f "$transcript" ] || return
@@ -66,14 +74,23 @@ case "$cmd" in
     disown ;;
   end)
     [ "$(field .reason)" = clear ] || exit 0
-    pid=$(claude_pid); [ -n "$pid" ] || exit 0
-    printf '%s\n' "$sid" >"$state/prev/$pid" ;;
+    k=$(key); [ -n "$k" ] || exit 0
+    printf '%s\n' "$sid" >"$state/prev/$k" ;;
   start)
-    [ "$(field .source)" = clear ] || exit 0
-    pid=$(claude_pid); [ -n "$pid" ] || exit 0
-    prev=$(cat "$state/prev/$pid" 2>/dev/null) || exit 0
-    [ -n "$prev" ] || exit 0
-    echo "This session follows $prev, cleared at $(date +%H:%M). To see what was said there, run: ctxgrep session $prev --talk (or ctxgrep last)." ;;
+    # After a clear, or a reopen within 10 minutes of one (the cleared process can close and `agent <name>` start a new one).
+    src=$(field .source)
+    k=$(key); [ -n "$k" ] || exit 0
+    f="$state/prev/$k"; [ -f "$f" ] || exit 0
+    case "$src" in
+      clear) ;;
+      startup) [ $(( $(date +%s) - $(stat -c %Y "$f") )) -le 600 ] || exit 0 ;;
+      *) exit 0 ;;
+    esac
+    prev=$(cat "$f"); [ -n "$prev" ] && [ "$prev" != "$sid" ] || exit 0
+    : >"$f"   # said once; a later reopen gets nothing
+    t="This session follows $prev, cleared at $(date +%H:%M). To see what was said there, run: ctxgrep session $prev --talk (or ctxgrep last)."
+    # additionalContext reaches the model with the first prompt; systemMessage shows Mackenzie at once that the hand-off is in.
+    jq -nc --arg t "$t" --arg m "ctxgauge: handed $prev to this session" '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $t}}' ;;
   *) echo "usage: ctxgauge gauge|stop|end|start (reads the hook's JSON on stdin)" >&2; exit 2 ;;
 esac
 exit 0
