@@ -1,0 +1,9 @@
+[Unit]
+Description=agent-memory: add new session lines to the ctxgrep store
+
+[Service]
+Type=oneshot
+ExecStart=%h/.cargo/bin/ctxgrep index
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=1G

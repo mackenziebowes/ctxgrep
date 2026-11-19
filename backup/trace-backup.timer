@@ -1,0 +1,9 @@
+[Unit]
+Description=agent-memory: back up Claude Code transcripts every hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

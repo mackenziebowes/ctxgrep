@@ -1,0 +1,9 @@
+[Unit]
+Description=agent-memory: copy Claude Code transcripts to /data2/claude-traces
+
+[Service]
+Type=oneshot
+ExecStart=%h/dev/projects/agent-memory/backup/trace-backup
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=512M

@@ -1,0 +1,15 @@
+[package]
+name = "ctxgrep"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "grep over every Claude Code session on this machine"
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled", "functions"] }
+regex = "1"
+libc = "0.2"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3

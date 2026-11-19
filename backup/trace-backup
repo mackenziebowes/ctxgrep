@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Copy Claude Code's raw session transcripts to /data2, a separate disk from home.
+# Copies new and grown files; files deleted at home stay in the backup (no --delete, by choice today).
+# One line per run in the log, so a missed or failed run shows.
+set -uo pipefail
+src="${TRACE_BACKUP_SRC:-$HOME/.claude/projects}/"
+dst="${TRACE_BACKUP_DST:-/data2/claude-traces}/"
+log="${TRACE_BACKUP_LOG:-$HOME/.local/state/trace-backup/runs.log}"
+mkdir -p "$dst" "$(dirname "$log")"
+start=$(date +%s)
+out=$(rsync -a --stats "$src" "$dst" 2>&1); rc=$?
+files=$(sed -n 's/^Number of regular files transferred: //p' <<<"$out" | tr -d ,)
+bytes=$(sed -n 's/^Total transferred file size: \([0-9,]*\).*/\1/p' <<<"$out" | tr -d ,)
+printf '%s rc=%s files=%s bytes=%s secs=%s\n' "$(date -Iseconds)" "$rc" "${files:-?}" "${bytes:-?}" "$(( $(date +%s) - start ))" >>"$log"
+[ "$rc" -eq 0 ] || { tail -5 <<<"$out" >&2; exit "$rc"; }
