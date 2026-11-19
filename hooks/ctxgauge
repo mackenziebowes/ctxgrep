@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# ctxgauge: Claude Code hooks that replace the sleep mod's two jobs (agent-memory, hub3 #28).
+#   ctxgauge gauge   UserPromptSubmit, PostToolUse: one line when the context first passes 50%
+#   ctxgauge stop    Stop: at 80% or more, type /clear into this session's own tmux pane once the turn has ended
+#   ctxgauge end     SessionEnd: on a clear, note this session's id for the session that follows it
+#   ctxgauge start   SessionStart: after a clear, tell the fresh context which session came before and how to read it
+# Windows per model family match the kits' autoCompactWindow (Opus 600k, Sonnet and Haiku 200k); CTXGAUGE_WINDOW overrides.
+set -uo pipefail
+cmd=${1:-}
+input=$(cat)
+state="${XDG_CACHE_HOME:-$HOME/.cache}/ctxgauge"
+mkdir -p "$state/prev"
+field() { jq -r "$1 // empty" <<<"$input"; }
+
+sid=$(field .session_id)
+transcript=$(field .transcript_path)
+[ -n "$(field .agent_id)" ] && exit 0   # a subagent's events: its lead's context is what counts
+
+# The Claude Code process this hook runs under: the nearest parent with a ~/.claude/sessions/<pid>.json.
+claude_pid() {
+  local p=$PPID
+  for _ in 1 2 3 4 5 6 7 8; do
+    [ -f "$HOME/.claude/sessions/$p.json" ] && { echo "$p"; return; }
+    p=$(awk '{print $4}' "/proc/$p/stat" 2>/dev/null) || return
+    [ -z "$p" ] || [ "$p" -le 1 ] && return
+  done
+}
+
+# Percent of the window the context holds, from the newest reply's usage in the transcript.
+percent() {
+  [ -f "$transcript" ] || return
+  local line model used window
+  line=$(tail -c 3000000 "$transcript" | tac | grep -m1 '"type":"assistant"')   # tac dies when grep stops early: no || here
+  [ -n "$line" ] || return
+  model=$(jq -r '.message.model // ""' <<<"$line")
+  used=$(jq -r '.message.usage | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)' <<<"$line")
+  case "$model" in
+    *opus*|*fable*) window=600000 ;;
+    *) window=200000 ;;
+  esac
+  window=${CTXGAUGE_WINDOW:-$window}
+  echo $(( used * 100 / window ))
+}
+
+say() {  # add one line to the model's context for this event
+  jq -nc --arg ev "$1" --arg t "$2" '{hookSpecificOutput: {hookEventName: $ev, additionalContext: $t}}'
+}
+
+case "$cmd" in
+  gauge)
+    p=$(percent) || exit 0; [ -n "$p" ] || exit 0
+    seen="$state/$sid.half"
+    if [ "$p" -ge 50 ] && [ ! -e "$seen" ]; then
+      touch "$seen"
+      say "$(field .hook_event_name)" "[ctxgauge] Your context is $p% full. Tell Mackenzie, and clear at your next natural break (a hand-back, a landing, a wait). At 80% it clears on its own when a turn ends."
+    fi ;;
+  stop)
+    [ "$(field .stop_hook_active)" = true ] && exit 0
+    p=$(percent) || exit 0; [ -n "$p" ] || exit 0
+    [ "$p" -ge 80 ] || exit 0
+    [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || exit 0   # only a session in its own tmux pane can be cleared this way
+    socket=${TMUX%%,*}
+    echo "$(date -Iseconds) $sid $p% clear pane $TMUX_PANE" >>"$state/clears.log"
+    # After the turn has ended and the prompt is back: type /clear as a person would.
+    (sleep 3; tmux -S "$socket" send-keys -t "$TMUX_PANE" -l '/clear'; sleep 0.3; tmux -S "$socket" send-keys -t "$TMUX_PANE" Enter) >/dev/null 2>&1 &
+    disown ;;
+  end)
+    [ "$(field .reason)" = clear ] || exit 0
+    pid=$(claude_pid); [ -n "$pid" ] || exit 0
+    printf '%s\n' "$sid" >"$state/prev/$pid" ;;
+  start)
+    [ "$(field .source)" = clear ] || exit 0
+    pid=$(claude_pid); [ -n "$pid" ] || exit 0
+    prev=$(cat "$state/prev/$pid" 2>/dev/null) || exit 0
+    [ -n "$prev" ] || exit 0
+    echo "This session follows $prev, cleared at $(date +%H:%M). To see what was said there, run: ctxgrep session $prev --talk (or ctxgrep last)." ;;
+  *) echo "usage: ctxgauge gauge|stop|end|start (reads the hook's JSON on stdin)" >&2; exit 2 ;;
+esac
+exit 0
