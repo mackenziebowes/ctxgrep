@@ -88,7 +88,10 @@ case "$cmd" in
     esac
     prev=$(cat "$f"); [ -n "$prev" ] && [ "$prev" != "$sid" ] || exit 0
     : >"$f"   # said once; a later reopen gets nothing
-    t="This session follows $prev, cleared at $(date +%H:%M). To see what was said there, run: ctxgrep session $prev --talk (or ctxgrep last)."
+    # The talk itself, newest end kept: additionalContext over 10k chars is cut by Claude Code, so cap at 9k.
+    talk=$(timeout 5 ctxgrep session "$prev" --talk 2>/dev/null | tail -c 9000)
+    t="This session follows $prev, cleared at $(date +%H:%M). What was said there (ctxgrep session $prev --talk; older talk: ctxgrep session $prev):
+$talk"
     # additionalContext reaches the model with the first prompt; systemMessage shows Mackenzie at once that the hand-off is in.
     jq -nc --arg t "$t" --arg m "ctxgauge: handed $prev to this session" '{systemMessage: $m, hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $t}}' ;;
   *) echo "usage: ctxgauge gauge|stop|end|start (reads the hook's JSON on stdin)" >&2; exit 2 ;;
