@@ -330,7 +330,10 @@ fn search(a: &[String]) {
         and (?5 is null or s.tool = ?5) and (?6 is null or x.cwd like '%' || ?6 || '%')
         and (?7 is null or s.ts >= ?7) and (?8 is null or s.ts < ?8)";
     let shown = if regex.is_some() { "s.text" } else { "snippet(spans_fts, 0, '[', ']', '…', 30)" };
-    let pattern = regex.clone().unwrap_or_else(|| words.join(" "));
+    // A bare word with punctuation (install-walk, foo.rs, a/b) is an FTS5 syntax error or a column filter, so quote it as a phrase.
+    // Words already in FTS syntax (quoted, OR/AND/NOT/NEAR, a trailing *) pass through unchanged.
+    let fts_word = |w: &String| if w.contains('"') || w.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*') { w.clone() } else { format!("\"{w}\"") };
+    let pattern = regex.clone().unwrap_or_else(|| words.iter().map(fts_word).collect::<Vec<_>>().join(" "));
     let ps = params![pattern, flag(a, "--agent"), flag(a, "--session"), flag(a, "--role"), flag(a, "--tool"), flag(a, "--cwd"),
         flag(a, "--since").map(|v| when(&v)), flag(a, "--until").map(|v| when(&v)), max];
 
