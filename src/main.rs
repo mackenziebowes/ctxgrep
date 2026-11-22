@@ -33,13 +33,65 @@ fn src_dir() -> PathBuf {
     std::env::var("CTXGREP_SRC").map(PathBuf::from).unwrap_or_else(|_| home().join(".claude/projects"))
 }
 
-fn open() -> Connection {
+/// Open the store for writing, making its folder and tables if needed; the error says which step failed.
+fn try_open() -> Result<Connection, String> {
     let p = db_path();
-    std::fs::create_dir_all(p.parent().unwrap()).expect("make the store's folder");
-    let c = Connection::open(&p).unwrap_or_else(|e| die(&format!("open {}: {e}", p.display())));
-    c.execute_batch("pragma journal_mode=wal; pragma synchronous=normal; pragma busy_timeout=5000;").unwrap();
-    c.execute_batch(SCHEMA).unwrap();
-    c
+    let dir = p.parent().ok_or_else(|| format!("{} has no folder", p.display()))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("make folder {}: {e}", dir.display()))?;
+    let c = Connection::open(&p).map_err(|e| format!("open {}: {e}", p.display()))?;
+    c.execute_batch("pragma journal_mode=wal; pragma synchronous=normal; pragma busy_timeout=5000;").map_err(|e| format!("set up {}: {e}", p.display()))?;
+    c.execute_batch(SCHEMA).map_err(|e| format!("write {}: {e}", p.display()))?;
+    Ok(c)
+}
+
+fn open() -> Connection { try_open().unwrap_or_else(|e| die(&e)) }
+
+/// `ctxgrep doctor`: one line per check, `ok` or what to fix; exit 1 if any check fails.
+fn doctor() -> ! {
+    let mut failed = false;
+    let mut line = |ok: bool, name: &str, msg: String| {
+        println!("{}  {name}: {msg}", if ok { "ok  " } else { "FAIL" });
+        failed |= !ok;
+    };
+
+    // 1. the binary runs, and its SQLite has the full-text search the store needs
+    let fts = Connection::open_in_memory().map_err(|e| e.to_string())
+        .and_then(|c| c.execute_batch("create virtual table t using fts5(x)").map_err(|e| e.to_string())
+            .map(|_| rusqlite::version().to_string()));
+    match fts {
+        Ok(v) => line(true, "binary", format!("ctxgrep {} runs; SQLite {v} with FTS5", env!("CARGO_PKG_VERSION"))),
+        Err(e) => line(false, "binary", format!("SQLite has no FTS5 ({e}); rebuild with `cargo build --release` from a clean clone")),
+    }
+
+    // 2. the source folder exists and has transcripts
+    let src = src_dir();
+    if !src.is_dir() {
+        line(false, "source", format!("{} is not a folder; run Claude Code once so it exists, or set CTXGREP_SRC to the folder that holds your .jsonl transcripts", src.display()));
+    } else {
+        let mut files = Vec::new();
+        jsonl_files(&src, &mut files);
+        if files.is_empty() {
+            line(false, "source", format!("{} has no .jsonl transcripts; have a Claude Code conversation first, or point CTXGREP_SRC at the right folder", src.display()));
+        } else {
+            line(true, "source", format!("{} has {} transcript files", src.display(), files.len()));
+        }
+    }
+
+    // 3. the store can be written (taking the write lock fails on a read-only file or folder)
+    let p = db_path();
+    let store = try_open().and_then(|c| c.execute_batch("begin immediate; rollback;").map_err(|e| format!("lock {}: {e}", p.display())).map(|_| c));
+    match &store {
+        Ok(_) => line(true, "store", format!("{} is writable", p.display())),
+        Err(e) => line(false, "store", format!("{e}; make that folder writable, or set CTXGREP_DB to a path you can write")),
+    }
+
+    // 4. the index has something in it
+    match store.and_then(|c| c.query_row("select count(*) from spans", [], |r| r.get::<_, i64>(0)).map_err(|e| e.to_string())) {
+        Ok(0) => line(false, "index", "the store is empty; run `ctxgrep index` (the first run can take minutes on a large history)".into()),
+        Ok(n) => line(true, "index", format!("{n} spans indexed")),
+        Err(e) => line(false, "index", format!("can't read the store ({e}); run `ctxgrep rebuild`")),
+    }
+    std::process::exit(if failed { 1 } else { 0 })
 }
 
 fn die(msg: &str) -> ! { eprintln!("ctxgrep: {msg}"); std::process::exit(2) }
@@ -50,6 +102,8 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         None | Some("-h") | Some("--help") | Some("help") => print!("{HELP}"),
+        Some("-V") | Some("--version") | Some("version") => println!("ctxgrep {}", env!("CARGO_PKG_VERSION")),
+        Some("doctor") => doctor(),
         Some("index") => index(&open()),
         Some("rebuild") => {
             let p = db_path();
@@ -72,6 +126,7 @@ const HELP: &str = "ctxgrep: grep over every Claude Code session on this machine
                                    read one session in order; an agent name means its newest session
   ctxgrep sql \"<select ...>\"       read-only SQL over sessions and spans (tab-separated out)
   ctxgrep index | rebuild          read what is new in ~/.claude/projects | drop the store and read it all
+  ctxgrep doctor                   check the install: one line per check, exit 1 if any fails
 
 Words use full-text syntax: juniper desk (both), \"exact phrase\", juni*, a OR b, a NOT b, NEAR(a b, 10).
 
