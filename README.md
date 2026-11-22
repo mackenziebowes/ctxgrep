@@ -17,7 +17,7 @@ $ ctxgrep juniper
 11-10 15:02:11  -  3f9c1a72:1  user  checkout is returning a 500 since I upgraded [juniper] to 4.2, can you look?
 ```
 
-Newest first, one hit per line: local time, agent name (`-` if the session wasn't named), `session:turn`, who said it (`user`, `assistant`, or `tool_result[Bash]` for a tool's output), then the text with your match in `[brackets]`.
+Newest first, one hit per line: local time, agent name (the session's name, if Claude Code recorded one as `agentName` in its transcript; `-` if not), `session:turn`, who said it (`user`, `assistant`, or `tool_result[Bash]` for a tool's output), then the text with your match in `[brackets]`.
 
 Want the surrounding conversation? Add `-C 1` for one turn either side, and narrow by project with `--cwd`:
 

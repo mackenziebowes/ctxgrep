@@ -163,8 +163,13 @@ fn index(c: &Connection) {
     let mut files = Vec::new();
     jsonl_files(&src_dir(), &mut files);
     let (mut n_files, mut n_spans) = (0, 0usize);
-    for f in &files {
+    let started = std::time::Instant::now();
+    for (i, f) in files.iter().enumerate() {
         match index_file(c, f) { Ok(0) => {}, Ok(n) => { n_files += 1; n_spans += n } Err(e) => eprintln!("ctxgrep: {}: {e}", f.display()) }
+        // A first index of a long history takes many minutes; say it is moving, and that a stop loses nothing.
+        if n_files > 0 && n_files % 250 == 0 && (i + 1) < files.len() {
+            eprintln!("ctxgrep: {} of {} files read, {n_spans} spans so far ({}s; safe to stop: the next run carries on)", i + 1, files.len(), started.elapsed().as_secs());
+        }
     }
     println!("indexed {n_spans} spans from {n_files} changed files ({} files seen)", files.len());
 }
