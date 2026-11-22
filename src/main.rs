@@ -333,7 +333,7 @@ fn search(a: &[String]) {
     // A bare word with punctuation (install-walk, foo.rs, a/b) is an FTS5 syntax error or a column filter, so quote it as a phrase.
     // Words already in FTS syntax (quoted, OR/AND/NOT/NEAR, a trailing *) pass through unchanged.
     let fts_word = |w: &String| if w.contains('"') || w.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '*') { w.clone() } else { format!("\"{w}\"") };
-    let pattern = regex.clone().unwrap_or_else(|| words.iter().map(fts_word).collect::<Vec<_>>().join(" "));
+    let pattern = regex.clone().unwrap_or_else(|| words.iter().flat_map(|w| if w.contains('"') { vec![w.clone()] } else { w.split_whitespace().map(String::from).collect() }).map(|w| fts_word(&w)).collect::<Vec<_>>().join(" "));
     let ps = params![pattern, flag(a, "--agent"), flag(a, "--session"), flag(a, "--role"), flag(a, "--tool"), flag(a, "--cwd"),
         flag(a, "--since").map(|v| when(&v)), flag(a, "--until").map(|v| when(&v)), max];
 
