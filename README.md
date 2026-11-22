@@ -57,7 +57,7 @@ session 7be40d15-0000-4000-8000-000000000002
 
 ## Install
 
-Hand [INSTALL.md](INSTALL.md) to your Claude Code and ask it to follow it. It builds `ctxgrep` from source (needs Rust and a C compiler), installs it into a folder you pick, and ends by running `ctxgrep doctor`.
+Ask your Claude Code: "Install ctxgrep from https://github.com/mackenziebowes/ctxgrep by following its INSTALL.md." It builds `ctxgrep` from source (needs Rust and a C compiler), installs it into a folder you pick, and ends by running `ctxgrep doctor`.
 
 ## What is not in this release
 

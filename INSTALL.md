@@ -4,6 +4,8 @@ You are installing `ctxgrep`, a command-line search over the user's Claude Code 
 
 Do not touch `hooks/`, `backup/` or `index/` in this repo: they are for the author's machine only (see README.md, "What is not in this release").
 
+If you don't have the repo yet, clone it: `git clone https://github.com/mackenziebowes/ctxgrep.git`; **Check:** the new `ctxgrep` folder holds `Cargo.toml`.
+
 Throughout, `<REPO>` is the folder that contains this file (the one with `Cargo.toml`), and `<PREFIX>` is the folder the user wants the program installed under. **Ask the user for `<PREFIX>`** or propose one (for example `$HOME/.local/ctxgrep`). The program ends up at `<PREFIX>/bin/ctxgrep`. Use absolute paths.
 
 ## 1. Check the build tools
